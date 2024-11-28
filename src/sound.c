@@ -51,10 +51,10 @@ DWORD TakeSample(HSOUND hSound, DWORD dwSampleRate) {
     }
     break;
   }
-  hSound->qwPosition += ((DWORD64)hSound->lpWaveFormat->nSamplesPerSec << 32) / dwSampleRate;
+  hSound->qwPosition += ((DWORDLONG)hSound->lpWaveFormat->nSamplesPerSec << 32) / dwSampleRate;
   if ((DWORD)(hSound->qwPosition >> 32) * hSound->lpWaveFormat->nBlockAlign >= hSound->dwBufferLength) {
     InterlockedOr((volatile LONG *)&hSound->bPaused, !hSound->bLoop); /* IDK: SHOULD WORK FINE */
-    hSound->qwPosition &= (~(DWORD64)0 >> 32);
+    hSound->qwPosition &= (~(DWORDLONG)0 >> 32);
   }
   return dwSample;
 }
