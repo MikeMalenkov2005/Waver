@@ -25,8 +25,7 @@ struct HSOUND__ {
   LPCWAVEFORMATEX lpWaveFormat;
   LPCVOID lpSoundBuffer;
   DWORD dwBufferLength;
-  DWORD dwSampleIndex;
-  DWORD dwSubsample;
+  DWORDLONG qwPosition;
   BOOL bPaused;
   BOOL bLoop;
 };
@@ -34,29 +33,28 @@ struct HSOUND__ {
 DWORD TakeSample(HSOUND hSound, DWORD dwSampleRate) {
   if (!hSound || !dwSampleRate || hSound->bPaused || !hSound->lpSoundBuffer) return 0;
   DWORD dwSample = 0;
-  DWORD dwSampleIncrement = hSound->lpWaveFormat->nSamplesPerSec / dwSampleRate;
-  DWORD dwSubsampleIncrement = ((DWORD64)1 << 32) / (hSound->lpWaveFormat->nSamplesPerSec % dwSampleRate);
-  DWORD dwNewSubsample = hSound->dwSubsample + dwSubsampleIncrement;
-  if (dwNewSubsample < hSound->dwSubsample) ++dwSampleIncrement;
-  hSound->dwSubsample = dwNewSubsample;
+  DWORD dwFirstSampleOffset = (DWORD)(hSound->qwPosition >> 32) * hSound->lpWaveFormat->nBlockAlign;
+  DWORD dwSecondSampleOffset = dwFirstSampleOffset + hSound->lpWaveFormat->nBlockAlign;
+  if (dwSecondSampleOffset >= hSound->dwBufferLength) dwSecondSampleOffset = 0;
   switch (hSound->lpWaveFormat->wFormatTag) {
   case WAVE_FORMAT_PCM:
     if (hSound->lpWaveFormat->wBitsPerSample == 8) {
       LPCBYTE lpSamples = hSound->lpSoundBuffer;
-      dwSample |= (DWORD)(lpSamples[hSound->dwSampleIndex * hSound->lpWaveFormat->nBlockAlign] - 0x80) << 24;
-      dwSample |= (DWORD)(lpSamples[hSound->dwSampleIndex * hSound->lpWaveFormat->nBlockAlign + hSound->lpWaveFormat->nChannels - 1] - 0x80) << 8;
+      dwSample |= (DWORD)(lpSamples[dwFirstSampleOffset] - 0x80) << 24;
+      dwSample |= (DWORD)(lpSamples[dwFirstSampleOffset + hSound->lpWaveFormat->nChannels - 1] - 0x80) << 8;
+      dwSample |= dwSample >> 8;
     }
     else if (hSound->lpWaveFormat->wBitsPerSample == 16) {
       CONST WORD* lpSamples = hSound->lpSoundBuffer;
-      dwSample |= (DWORD)lpSamples[hSound->dwSampleIndex * hSound->lpWaveFormat->nBlockAlign] << 16;
-      dwSample |= (DWORD)lpSamples[hSound->dwSampleIndex * hSound->lpWaveFormat->nBlockAlign + hSound->lpWaveFormat->nChannels - 1];
+      dwSample |= (DWORD)lpSamples[(dwFirstSampleOffset >> 1)] << 16;
+      dwSample |= (DWORD)lpSamples[(dwFirstSampleOffset >> 1) + hSound->lpWaveFormat->nChannels - 1];
     }
     break;
   }
-  hSound->dwSampleIndex += dwSampleIncrement;
-  if (hSound->dwSampleIndex * hSound->lpWaveFormat->nBlockAlign >= hSound->dwBufferLength) {
+  hSound->qwPosition += ((DWORD64)hSound->lpWaveFormat->nSamplesPerSec << 32) / dwSampleRate;
+  if ((DWORD)(hSound->qwPosition >> 32) * hSound->lpWaveFormat->nBlockAlign >= hSound->dwBufferLength) {
     InterlockedOr((volatile LONG *)&hSound->bPaused, !hSound->bLoop); /* IDK: SHOULD WORK FINE */
-    hSound->dwSampleIndex = 0;
+    hSound->qwPosition &= (~(DWORD64)0 >> 32);
   }
   return dwSample;
 }
@@ -80,11 +78,6 @@ DWORD CALLBACK SoundPlayerThread(LPVOID lpParam) {
             lpSampleBuffer[dwSampleIndex << 1] += (WORD)(dwSample >> 16);
             lpSampleBuffer[(dwSampleIndex << 1) | 1] += (WORD)dwSample;
           }
-        }
-        /* TODO: REMOVE */
-        for (DWORD dwSampleIndex = 0; dwSampleIndex < nSamples; ++dwSampleIndex) {
-          lpSampleBuffer[dwSampleIndex << 1] += rand() >> 4;
-          lpSampleBuffer[(dwSampleIndex << 1) | 1] += rand() >> 4;
         }
         waveOutPrepareHeader(hWaveOut, &hPlayer->lpWaveHeaders[dwNextHeader], sizeof(WAVEHDR));
         waveOutWrite(hWaveOut, &hPlayer->lpWaveHeaders[dwNextHeader], sizeof(WAVEHDR));
